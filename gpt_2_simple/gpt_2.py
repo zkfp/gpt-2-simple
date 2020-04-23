@@ -24,6 +24,7 @@ except:
 from gpt_2_simple.src import model, sample, encoder, memory_saving_gradients
 from gpt_2_simple.src.load_dataset import load_dataset, Sampler
 from gpt_2_simple.src.accumulate import AccumulatingOptimizer
+from gpt_2_simple.src.ada_optimizer import AdafactorOptimizer, adafactor_decay_rate_adam, adafactor_decay_rate_pow
 
 assert tf.__version__ < '2.0.0', "gpt-2-simple currently does not support " \
     "TensorFlow 2.0. You'll need to use a virtualenv/cloud computer which " \
@@ -145,7 +146,7 @@ def finetune(sess,
              max_checkpoints=1,
              use_memory_saving_gradients=False,
              only_train_transformer_layers=False,
-             optimizer='adam',
+             optimizer='adafactor',
              overwrite=False):
     """Finetunes the model on the given dataset.
 
@@ -215,6 +216,35 @@ def finetune(sess,
         opt = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
     elif optimizer == 'sgd':
         opt = tf.compat.v1.train.GradientDescentOptimizer(learning_rate=learning_rate)
+    elif optimizer == 'adafactor':
+        params = {}
+        params["decay_type"] = "adam"
+        #params["beta1"] = 0.9
+        params["beta1"] = 0.0
+        params["beta2"] = 0.999
+        lr = learning_rate
+        if params["decay_type"] == "adam":
+            decay_rate = adafactor_decay_rate_adam(params["beta2"])
+        elif params["decay_type"] == "pow":
+            decay_rate = adafactor_decay_rate_pow(params["decay_exponent"])
+        else:
+            raise ValueError("unknown optimizer_adafactor_decay_type")
+
+        if not "weight_decay" in params.keys():
+            opt = AdafactorOptimizer(
+                learning_rate=lr,
+                decay_rate=decay_rate,
+                beta1=params["beta1"],
+                name="Adafactor")
+        else:
+            AdafactorWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(AdafactorOptimizer)
+
+            opt = AdafactorWOptimizer(
+                weight_decay=params["weight_decay"] * lr,
+                learning_rate=lr,
+                decay_rate=decay_rate,
+                beta1=params["beta1"],
+                name="AdafactorW")
 
     if accumulate_gradients > 1:
         if use_memory_saving_gradients:
