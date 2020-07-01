@@ -51,7 +51,7 @@ def download_file_with_progress(url_base, sub_dir, model_name, file_name):
     """
 
     # set to download 1MB at a time. This could be much larger with no issue
-    DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+    DOWNLOAD_CHUNK_SIZE = 1024 * 1024 * 50
     r = requests.get(url_base + "/models/" + model_name + "/" + file_name, stream=True)
     with open(os.path.join(sub_dir, file_name), 'wb') as f:
         file_size = int(r.headers["content-length"])
@@ -200,7 +200,9 @@ def finetune(sess,
     loss = tf.reduce_mean(
         input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=context[:, 1:], logits=output['logits'][:, :-1]))
-
+    
+    print("n_ctx: ", str(hparams.n_ctx))
+    
     tf_sample = sample.sample_sequence(
         hparams=hparams,
         length=sample_length,
