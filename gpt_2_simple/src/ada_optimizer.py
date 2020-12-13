@@ -3,26 +3,32 @@ import tensorflow as tf
 
 
 def create_train_op(loss, params):
-    lr = params["lr"]
+    learning_rate = params["lr"]
     if "warmup_steps" in params.keys():
-        lr = cosine_decay_with_warmup(tf.compat.v1.train.get_global_step(), lr,
-                                        params["max_steps"], warmup_steps=params["warmup_steps"])
+        learning_rate = cosine_decay_with_warmup(
+            tf.compat.v1.train.get_global_step(),
+            learning_rate,
+            params["max_steps"],
+            warmup_steps=params["warmup_steps"],
+        )
 
     if params["opt_name"] == "adam":
         if not "weight_decay" in params.keys():
             optimizer = tf.compat.v1.train.AdamOptimizer(
-                learning_rate=lr,
+                learning_rate=learning_rate,
                 beta1=params["beta1"],
                 beta2=params["beta2"],
-                epsilon=params["epsilon"])
+                epsilon=params["epsilon"],
+            )
 
         else:
             optimizer = tf.contrib.opt.AdamWOptimizer(
-                learning_rate=lr,
-                weight_decay=lr*params["weight_decay"],
+                learning_rate=learning_rate,
+                weight_decay=learning_rate * params["weight_decay"],
                 beta1=params["beta1"],
                 beta2=params["beta2"],
-                epsilon=params["epsilon"])
+                epsilon=params["epsilon"],
+            )
 
     elif params["opt_name"] == "adafactor":
         if params["decay_type"] == "adam":
@@ -34,20 +40,24 @@ def create_train_op(loss, params):
 
         if not "weight_decay" in params.keys():
             optimizer = AdafactorOptimizer(
-                learning_rate=lr,
+                learning_rate=learning_rate,
                 decay_rate=decay_rate,
                 beta1=params["beta1"],
-                name="Adafactor")
+                name="Adafactor",
+            )
 
         else:
-            AdafactorWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(AdafactorOptimizer)
+            AdafactorWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(
+                AdafactorOptimizer
+            )
 
             optimizer = AdafactorWOptimizer(
-                weight_decay=params["weight_decay"] * lr,
-                learning_rate=lr,
+                weight_decay=params["weight_decay"] * learning_rate,
+                learning_rate=learning_rate,
                 decay_rate=decay_rate,
                 beta1=params["beta1"],
-                name="AdafactorW")
+                name="AdafactorW",
+            )
 
     else:
         raise ValueError("Unknown optimizer type!")
@@ -55,47 +65,63 @@ def create_train_op(loss, params):
     if params["use_tpu"]:
         optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
 
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) # To update batchnorm, if present
-    train_op = optimizer.minimize(loss, global_step=tf.compat.v1.train.get_global_step())
+    update_ops = tf.get_collection(
+        tf.GraphKeys.UPDATE_OPS
+    )  # To update batchnorm, if present
+    train_op = optimizer.minimize(
+        loss, global_step=tf.compat.v1.train.get_global_step()
+    )
     train_op = tf.group([train_op, update_ops])
 
     return train_op
 
 
-
-def cosine_decay_with_warmup(global_step,
-                             learning_rate_base,
-                             total_steps,
-                             warmup_learning_rate=0.0,
-                             warmup_steps=0,
-                             hold_base_rate_steps=0,
-                             name="learning_rate"):
+def cosine_decay_with_warmup(
+    global_step,
+    learning_rate_base,
+    total_steps,
+    warmup_learning_rate=0.0,
+    warmup_steps=0,
+    hold_base_rate_steps=0,
+    name="learning_rate",
+):
     if total_steps < warmup_steps:
-        raise ValueError('total_steps must be larger or equal to '
-                        'warmup_steps.')
-    learning_rate = 0.5 * learning_rate_base * (1 + tf.cos(
-        np.pi *
-        (tf.cast(global_step, tf.float32) - warmup_steps - hold_base_rate_steps
-        ) / float(total_steps - warmup_steps - hold_base_rate_steps)))
+        raise ValueError("total_steps must be larger or equal to " "warmup_steps.")
+    learning_rate = (
+        0.5
+        * learning_rate_base
+        * (
+            1
+            + tf.cos(
+                np.pi
+                * (
+                    tf.cast(global_step, tf.float32)
+                    - warmup_steps
+                    - hold_base_rate_steps
+                )
+                / float(total_steps - warmup_steps - hold_base_rate_steps)
+            )
+        )
+    )
     if hold_base_rate_steps > 0:
-        learning_rate = tf.where(global_step > warmup_steps + hold_base_rate_steps,
-                                learning_rate, learning_rate_base)
+        learning_rate = tf.where(
+            global_step > warmup_steps + hold_base_rate_steps,
+            learning_rate,
+            learning_rate_base,
+        )
     if warmup_steps > 0:
         if learning_rate_base < warmup_learning_rate:
-            raise ValueError('learning_rate_base must be larger or equal to '
-                        'warmup_learning_rate.')
+            raise ValueError(
+                "learning_rate_base must be larger or equal to " "warmup_learning_rate."
+            )
         slope = (learning_rate_base - warmup_learning_rate) / warmup_steps
-        warmup_rate = slope * tf.cast(global_step,
-                                    tf.float32) + warmup_learning_rate
-        learning_rate = tf.where(global_step < warmup_steps, warmup_rate,
-                                learning_rate)
-    return tf.where(global_step > total_steps, 0.0, learning_rate,
-                    name=name)
-
-
+        warmup_rate = slope * tf.cast(global_step, tf.float32) + warmup_learning_rate
+        learning_rate = tf.where(global_step < warmup_steps, warmup_rate, learning_rate)
+    return tf.where(global_step > total_steps, 0.0, learning_rate, name=name)
 
 
 # Adafactor from tensor2tensor -------------------------------------------------------------
+
 
 class AdafactorOptimizer(tf.compat.v1.train.Optimizer):
     """Optimizer that implements the Adafactor algorithm.
@@ -160,36 +186,40 @@ class AdafactorOptimizer(tf.compat.v1.train.Optimizer):
         less memory usage.
     """
 
-    def __init__(self,
-                multiply_by_parameter_scale=True,
-                learning_rate=None,
-                decay_rate=None,
-                beta1=0.0,
-                clipping_threshold=1.0,
-                factored=True,
-                use_locking=False,
-                weight_decay=0.0,
-                name="Adafactor",
-                epsilon1=1e-30,
-                epsilon2=1e-3):
+    def __init__(
+        self,
+        multiply_by_parameter_scale=True,
+        learning_rate=None,
+        decay_rate=None,
+        beta1=0.0,
+        clipping_threshold=1.0,
+        factored=True,
+        use_locking=False,
+        weight_decay=0.0,
+        name="Adafactor",
+        epsilon1=1e-30,
+        epsilon2=1e-3,
+    ):
         """Construct a new Adafactor optimizer.
+
         See class comment.
+
         Args:
-        multiply_by_parameter_scale: a boolean
-        learning_rate: an optional Scalar.
-        decay_rate: an optional Scalar.
-        beta1: a float value between 0 and 1
-        clipping_threshold: an optional float >= 1
-        factored: a boolean - whether to use factored second-moment estimator
-            for 2d variables
-        use_locking: If True use locks for update operations.
-        name: Optional name for the operations created when applying gradients.
-            Defaults to "AdafactorOptimizer".
-        epsilon1: Regularization constant for squared gradient.
-        epsilon2: Regularization constant for parameter scale.
+          multiply_by_parameter_scale: a boolean
+          learning_rate: an optional Scalar.
+          decay_rate: an optional Scalar.
+          beta1: a float value between 0 and 1
+          clipping_threshold: an optional float >= 1
+          factored: a boolean - whether to use factored second-moment estimator
+              for 2d variables
+          use_locking: If True use locks for update operations.
+          name: Optional name for the operations created when applying gradients.
+              Defaults to "AdafactorOptimizer".
+          epsilon1: Regularization constant for squared gradient.
+          epsilon2: Regularization constant for parameter scale.
         Raises:
-        ValueError: if absolute_update_scale and relative_update_scale_fn are both
-            present or both absent.
+          ValueError: if absolute_update_scale and relative_update_scale_fn are both
+              present or both absent.
         """
         super(AdafactorOptimizer, self).__init__(use_locking, name)
         self._multiply_by_parameter_scale = multiply_by_parameter_scale
@@ -238,7 +268,8 @@ class AdafactorOptimizer(tf.compat.v1.train.Optimizer):
     def _resource_apply_sparse(self, grad, handle, indices):
         return self._resource_apply_dense(
             tf.convert_to_tensor(tf.IndexedSlices(grad, indices, tf.shape(handle))),
-            handle)
+            handle,
+        )
 
     def _parameter_scale(self, var):
         """Estimate the scale of the parameters from the current values.
@@ -279,9 +310,9 @@ class AdafactorOptimizer(tf.compat.v1.train.Optimizer):
             grad_squared_row_mean = tf.reduce_mean(grad_squared, -1)
             grad_squared_col_mean = tf.reduce_mean(grad_squared, -2)
             vr = self.get_slot(var, "vr")
-            new_vr = (decay_rate * vr + mixing_rate * grad_squared_row_mean)
+            new_vr = decay_rate * vr + mixing_rate * grad_squared_row_mean
             vc = self.get_slot(var, "vc")
-            new_vc = (decay_rate * vc + mixing_rate * grad_squared_col_mean)
+            new_vc = decay_rate * vc + mixing_rate * grad_squared_col_mean
             vr_update = tf.assign(vr, new_vr, use_locking=self._use_locking)
             vc_update = tf.assign(vc, new_vc, use_locking=self._use_locking)
             updates = [vr_update, vc_update]
@@ -330,11 +361,14 @@ def adafactor_decay_rate_adam(beta2):
 def adafactor_decay_rate_pow(exponent):
     return 1.0 - tf.pow((step_num() + 1.0), -exponent)
 
+
 def step_num():
     return tf.to_float(tf.compat.v1.train.get_or_create_global_step())
 
+
 def reduce_rms(x):
     return tf.sqrt(tf.reduce_mean(tf.square(x)))
+
 
 def cast_like(x, y):
     """Cast x to y's dtype, if necessary."""
@@ -351,9 +385,18 @@ def cast_like(x, y):
             x_name = x.name
         except AttributeError:
             pass
-        tf.logging.warning("Cast for %s may induce copy from '%s' to '%s'", x_name,
-                        x.device, cast_x.device)
+        tf.logging.warning(
+            "Cast for %s may induce copy from '%s' to '%s'",
+            x_name,
+            x.device,
+            cast_x.device,
+        )
     return cast_x
 
-AdafactorWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(AdafactorOptimizer)
-AdamWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(tf.compat.v1.train.AdamOptimizer)
+
+AdafactorWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(
+    AdafactorOptimizer
+)
+AdamWOptimizer = tf.contrib.opt.extend_with_decoupled_weight_decay(
+    tf.compat.v1.train.AdamOptimizer
+)
