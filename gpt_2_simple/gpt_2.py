@@ -92,7 +92,7 @@ def download_gpt2(model_dir="models", model_name="124M"):
         os.makedirs(sub_dir)
     sub_dir = sub_dir.replace("\\", "/")  # needed for Windows
 
-    for file_name in [
+    file_names = [
         "checkpoint",
         "encoder.json",
         "hparams.json",
@@ -100,9 +100,10 @@ def download_gpt2(model_dir="models", model_name="124M"):
         "model.ckpt.index",
         "model.ckpt.meta",
         "vocab.bpe",
-    ]:
+    ]
+    for file_name in file_names:
         download_file_with_progress(
-            url_base="https://storage.googleapis.com/gpt-2",
+            url_base="https://openaipublic.blob.core.windows.net/gpt-2",
             sub_dir=sub_dir,
             model_name=model_name,
             file_name=file_name,
@@ -160,6 +161,7 @@ def finetune(
     multi_gpu=False,
     save_every=1000,
     print_every=1,
+    sample_dir="samples",
     max_checkpoints=1,
     use_memory_saving_gradients=False,
     only_train_transformer_layers=False,
@@ -171,8 +173,6 @@ def finetune(
     Adapted from https://github.com/nshepperd/gpt-2/blob/finetuning/train.py.
     See that file for parameter definitions.
     """
-
-    SAMPLE_DIR = "samples"
 
     checkpoint_path = os.path.join(checkpoint_dir, run_name)
 
@@ -352,9 +352,9 @@ def finetune(
                 all_text.append(text)
                 index += 1
         print(text)
-        os.makedirs(os.path.join(SAMPLE_DIR, run_name), exist_ok=True)
+        os.makedirs(os.path.join(sample_dir, run_name), exist_ok=True)
         with open(
-            os.path.join(SAMPLE_DIR, run_name, "samples-{}").format(counter), "w"
+            os.path.join(sample_dir, run_name, "samples-{}").format(counter), "w"
         ) as fp:
             fp.write("\n".join(all_text))
 
@@ -464,7 +464,6 @@ def generate(
     checkpoint_dir="checkpoint",
     model_name=None,
     model_dir="models",
-    sample_dir="samples",
     return_as_list=False,
     truncate=None,
     destination_path=None,
